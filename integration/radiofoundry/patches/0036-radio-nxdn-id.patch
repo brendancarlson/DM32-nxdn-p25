@@ -1,0 +1,581 @@
+--- a/core/codeplug/codeplug.c
++++ b/core/codeplug/codeplug.c
+@@ -69,6 +69,10 @@
+ #define BOOT_TEXT	EE(0x7540u)	// two 16 byte lines (open-firmware-cps.md 7, CPS section 2)
+ #define GEN_BASE	GEN_CALLSIGN	// the general settings block
+ #define GEN_DMR_ID	EE(0x00E8u)
++// The radio's NXDN unit ID: general settings 0x0D-0x0F, which the vendor layout reserves. A marker byte then the ID, 16 bit
++// big endian; anything else there (the vendor CPS's zeros or 0xFF) is "none"
++#define GEN_NXDN_ID	EE(0x00EDu)
++#define GEN_NXDN_MARK	0x4Eu
+ #define GEN_GROUP_HANG	0x18u	// offsets in the block
+ #define GEN_PRIV_HANG	0x19u
+ #define GEN_CLEAR	0x1Au	// the bytes up to the hang times: what the radio reads of the block
+@@ -1287,6 +1291,38 @@
+ 	return id;
+ }
+ 
++uint32_t codeplug_nxdn_id(void)
++{
++	uint8_t b[3];
++	uint32_t id = 0;
++	storage_lock();
++	if (source == CODEPLUG_OPENFW && flash_read(GEN_NXDN_ID, b, sizeof(b)) && b[0] == GEN_NXDN_MARK) {
++		id = ((uint32_t)b[1] << 8) | b[2];
++	}
++	storage_unlock();
++	return id <= CODEPLUG_NXDN_ID_MAX ? id : 0;
++}
++
++bool codeplug_set_nxdn_id(uint32_t id)
++{
++	uint8_t b[3] = { 0xFF, 0xFF, 0xFF };
++	if (id > CODEPLUG_NXDN_ID_MAX) {
++		return false;
++	}
++	if (id != 0) {
++		b[0] = GEN_NXDN_MARK;
++		b[1] = (uint8_t)(id >> 8);
++		b[2] = (uint8_t)id;
++	}
++	storage_lock();
++	bool ok = materialize() && flash_write(GEN_NXDN_ID, b, sizeof(b));
++	if (ok) {
++		serial++;
++	}
++	storage_unlock();
++	return ok;
++}
++
+ bool codeplug_set_dmr_id(uint32_t id)
+ {
+ 	uint8_t b[4];
+--- a/core/codeplug/codeplug.h
++++ b/core/codeplug/codeplug.h
+@@ -16,6 +16,7 @@
+ 
+ #define CODEPLUG_NAME_LEN	16
+ #define CODEPLUG_ZONE_MAX	80	// channels per zone
++#define CODEPLUG_NXDN_ID_MAX	65519u		// an NXDN unit ID is 16 bits; 65520-65535 are special (65535 the all call)
+ #define CODEPLUG_DMR_ID_MAX	16776415u	// a radio's own ID; the IDs above it are the system's (gateways, all call)
+ 
+ typedef struct {
+@@ -208,6 +209,9 @@
+ 
+ // The radio's own DMR ID from the general settings, 0 if none is stored
+ uint32_t codeplug_dmr_id(void);
++// The radio's NXDN unit ID (general settings 0x0D), 1..CODEPLUG_NXDN_ID_MAX, 0 if none: NXDN channels use it
++uint32_t codeplug_nxdn_id(void);
++bool codeplug_set_nxdn_id(uint32_t id);		// 1..CODEPLUG_NXDN_ID_MAX, 0 = none
+ // Contacts 1..CODEPLUG_CONTACTS_MAX; false if empty or unreadable
+ bool codeplug_contact(uint16_t index, contact_t *out);
+ // RX group lists 1..CODEPLUG_LISTS_MAX; false if unused or unreadable
+--- a/core/radio/radio_sm.c
++++ b/core/radio/radio_sm.c
+@@ -834,10 +834,18 @@
+ #if RADIO_SM_DV
+ // --- Digital voice channels (P25, NXDN): radio_dv.h keeps the modem; the radio core keeps the policy ---
+ 
+-// The unit ID our calls carry: the channel's ID override, else the radio's DMR ID
++// The unit ID our calls carry: the channel's ID override, else the radio's NXDN ID on an NXDN channel, else the
++// radio's DMR ID
+ static uint32_t dv_unit_id(const channel_t *ch)
+ {
+-	return ch->dmr_id != 0 ? ch->dmr_id : codeplug_dmr_id();
++	if (ch->dmr_id != 0)
++		return ch->dmr_id;
++	if (ch->mode == RADIO_MODE_NXDN) {
++		uint32_t nxdn = codeplug_nxdn_id();
++		if (nxdn != 0)
++			return nxdn;
++	}
++	return codeplug_dmr_id();
+ }
+ 
+ #define NXDN_UNIT_MAX	65519u	// 65520-65535 are special IDs (65535 the all call)
+--- a/core/ui/lang/es.po
++++ b/core/ui/lang/es.po
+@@ -2233,6 +2233,18 @@
+ msgstr "ID desde 1"
+ 
+ #: core/ui/ui_menus.c
++msgid "NXDN ID"
++msgstr "ID NXDN"
++
++#: core/ui/ui_menus.c
++msgid "NXDN ID saved"
++msgstr "ID NXDN guardado"
++
++#: core/ui/ui_menus.c
++msgid "NXDN IDs go up to 65519"
++msgstr "ID NXDN máximo es 65519"
++
++#: core/ui/ui_menus.c
+ msgid "DMR ID saved"
+ msgstr "ID DMR guardado"
+ 
+--- a/core/ui/lang/it.po
++++ b/core/ui/lang/it.po
+@@ -2233,6 +2233,18 @@
+ msgstr "Gli ID partono da 1"
+ 
+ #: core/ui/ui_menus.c
++msgid "NXDN ID"
++msgstr "ID NXDN"
++
++#: core/ui/ui_menus.c
++msgid "NXDN ID saved"
++msgstr "ID NXDN salvato"
++
++#: core/ui/ui_menus.c
++msgid "NXDN IDs go up to 65519"
++msgstr "Gli ID NXDN arrivano a 65519"
++
++#: core/ui/ui_menus.c
+ msgid "DMR ID saved"
+ msgstr "ID DMR salvato"
+ 
+--- a/core/ui/ui_menus.c
++++ b/core/ui/ui_menus.c
+@@ -3854,6 +3854,9 @@
+ enum {
+ #if CONFIG_DMR
+ 	MY_ID,
++#if CONFIG_NXDN
++	MY_NXDN,		// the NXDN unit ID: NXDN channels without an ID of their own carry it
++#endif
+ #endif
+ 	MY_NAME, MY_BOOT1, MY_BOOT2, MY_COUNT };
+ static const uint8_t my_names[] = { [MY_NAME] = UI_NAME_RADIO, [MY_BOOT1] = UI_NAME_BOOT1, [MY_BOOT2] = UI_NAME_BOOT2 };
+@@ -3866,6 +3869,20 @@
+ static uint8_t dmr_id_len;		// digits typed
+ static bool dmr_id_editing;
+ static uint32_t dmr_id_saved, dmr_id_serial;	// the ID just saved, shown until the codeplug's serial moves on
++static uint8_t dmr_id_row;		// the row being typed: MY_ID or MY_NXDN
++#if CONFIG_NXDN
++static uint32_t nxdn_id_saved, nxdn_id_serial;
++static bool nxdn_id_set;		// nxdn_id_saved holds a save (it may be 0: cleared)
++#endif
++
++static bool my_id_row(uint16_t i)
++{
++#if CONFIG_NXDN
++	if (i == MY_NXDN)
++		return true;
++#endif
++	return i == MY_ID;
++}
+ #endif
+ 
+ static uint16_t dmr_id_count(void) { return MY_COUNT; }
+@@ -3878,6 +3895,9 @@
+ 	my_text_row = MY_COUNT;		// the stored name shows again
+ #if CONFIG_DMR
+ 	dmr_id_saved = 0;
++#if CONFIG_NXDN
++	nxdn_id_set = false;
++#endif
+ #endif
+ }
+ 
+@@ -3886,11 +3906,31 @@
+ 	sbuf_t b;
+ 	sb_init(&b, it->value, sizeof it->value);
+ #if CONFIG_DMR
++#if CONFIG_NXDN
++	if (i == MY_NXDN) {
++		str_copy(it->label, sizeof it->label, TR("NXDN ID"));
++		bool typing = dmr_id_editing && dmr_id_row == MY_NXDN;
++		uint32_t v = typing ? dmr_id_value : nxdn_id_set && codeplug_serial() == nxdn_id_serial ?
++			     nxdn_id_saved : (uint32_t)ui_svc_setting_get(UI_SET_NXDN_ID);
++		if (typing) {
++			if (dmr_id_len > 0)
++				sb_u32(&b, v, 1);
++			sb_chr(&b, '_');
++			it->flags |= UI_ITEM_EDIT;
++		} else if (v != 0) {
++			sb_u32(&b, v, 1);
++		} else {
++			sb_str(&b, TR("Not set"));	// NXDN channels then use the DMR ID, if it fits 1-65519
++		}
++		return;
++	}
++#endif
+ 	if (i == MY_ID) {
+ 		str_copy(it->label, sizeof it->label, TR("DMR ID"));
+-		uint32_t v = dmr_id_editing ? dmr_id_value : dmr_id_saved != 0 && codeplug_serial() == dmr_id_serial ?
++		bool typing = dmr_id_editing && dmr_id_row == MY_ID;
++		uint32_t v = typing ? dmr_id_value : dmr_id_saved != 0 && codeplug_serial() == dmr_id_serial ?
+ 			     dmr_id_saved : (uint32_t)ui_svc_setting_get(UI_SET_DMR_ID);
+-		if (dmr_id_editing) {
++		if (typing) {
+ 			if (dmr_id_len > 0)
+ 				sb_u32(&b, v, 1);
+ 			sb_chr(&b, '_');		// what is typed so far, as the channel editor: "3101_"
+@@ -3940,8 +3980,9 @@
+ #endif
+ 
+ #if CONFIG_DMR
+-static void dmr_id_begin(void)
++static void dmr_id_begin(uint16_t row)
+ {
++	dmr_id_row = (uint8_t)row;
+ 	dmr_id_editing = true;
+ 	dmr_id_len = 0;
+ 	dmr_id_value = 0;
+@@ -3953,6 +3994,21 @@
+ 		dmr_id_editing = false;	// nothing typed: as it was
+ 		return;
+ 	}
++#if CONFIG_NXDN
++	if (dmr_id_row == MY_NXDN) {
++		dmr_id_editing = false;
++		uint32_t nserial = codeplug_serial();
++		if (!ui_svc_setting_set(UI_SET_NXDN_ID, (int32_t)dmr_id_value)) {
++			ui_toast(TR("Couldn't save: try again"));
++			return;
++		}
++		nxdn_id_saved = dmr_id_value;	// 0 clears it: NXDN channels then use the DMR ID
++		nxdn_id_serial = nserial;
++		nxdn_id_set = true;
++		ui_toast(TR("NXDN ID saved"));
++		return;
++	}
++#endif
+ 	if (dmr_id_value == 0) {
+ 		ui_toast(TR("IDs start at 1"));	// 0 would leave the codeplug without one
+ 		return;
+@@ -3973,11 +4029,11 @@
+ {
+ 	(void)hold;
+ #if CONFIG_DMR
+-	if (i == MY_ID) {
+-		if (dmr_id_editing)
++	if (my_id_row(i)) {
++		if (dmr_id_editing && dmr_id_row == i)
+ 			dmr_id_save();
+ 		else
+-			dmr_id_begin();
++			dmr_id_begin(i);
+ 		return;
+ 	}
+ #endif
+@@ -3998,10 +4054,16 @@
+ {
+ #if CONFIG_DMR
+ 	bool press = ev->gesture == GESTURE_PRESS || ev->gesture == GESTURE_LONG;
+-	if (ev->action >= ACT_DIGIT_0 && ev->action <= ACT_DIGIT_9 && press && ui_frame()->focus == MY_ID) {
+-		if (!dmr_id_editing)
+-			dmr_id_begin();
++	if (ev->action >= ACT_DIGIT_0 && ev->action <= ACT_DIGIT_9 && press && my_id_row(ui_frame()->focus)) {
++		if (!dmr_id_editing || dmr_id_row != ui_frame()->focus)
++			dmr_id_begin(ui_frame()->focus);
+ 		uint32_t v = dmr_id_value * 10u + (uint32_t)(ev->action - ACT_DIGIT_0);
++#if CONFIG_NXDN
++		if (dmr_id_row == MY_NXDN && v > CODEPLUG_NXDN_ID_MAX) {
++			ui_toast(TR("NXDN IDs go up to 65519"));
++			return true;
++		}
++#endif
+ 		if (v > CODEPLUG_DMR_ID_MAX) {
+ 			ui_toast(TR("IDs go up to 16776415"));	// the IDs above are the network's
+ 			return true;
+--- a/core/ui/ui_svc.h
++++ b/core/ui/ui_svc.h
+@@ -323,6 +323,7 @@
+ 	UI_SET_BCAST_STEP,
+ 	UI_SET_ZONE_OFFERS,	// accept zone shares from other radios: 1 on (the default), 0 off (settings_t.zs_offers)
+ 	UI_SET_DMR_ID,		// the radio's own DMR ID in the codeplug, 1..CODEPLUG_DMR_ID_MAX (a set is a codeplug write job)
++	UI_SET_NXDN_ID,		// the radio's own NXDN unit ID in the codeplug, 1..CODEPLUG_NXDN_ID_MAX (a codeplug write job)
+ 	UI_SET_REF_TRIM,	// reference oscillator trim, ppb -10000..+10000 (Settings > Advanced; settings_t.ref_trim_ppb)
+ 	UI_SET_LANGUAGE,	// the UI's language, i18n.h lang_value: "en" English, 0 never picked (Settings > Display; settings_t.lang)
+ 	UI_SET_COUNT
+--- a/core/ui/ui_svc_storage.c
++++ b/core/ui/ui_svc_storage.c
+@@ -110,6 +110,9 @@
+ 
+ #if CONFIG_DMR
+ static bool dmr_id_post(uint32_t id);	// a job: the codeplug write is the housekeeping task's
++#if CONFIG_NXDN
++static bool nxdn_id_post(uint32_t id);
++#endif
+ #endif
+ 
+ int32_t ui_svc_setting_get(uint8_t id)
+@@ -257,6 +260,10 @@
+ #if CONFIG_DMR
+ 	case UI_SET_DMR_ID:
+ 		return (int32_t)codeplug_dmr_id();
++#if CONFIG_NXDN
++	case UI_SET_NXDN_ID:
++		return (int32_t)codeplug_nxdn_id();
++#endif
+ #endif
+ 	case UI_SET_NOISE_REDUCTION:
+ 		settings_read(&st);
+@@ -500,6 +507,10 @@
+ #if CONFIG_DMR
+ 	case UI_SET_DMR_ID:
+ 		return dmr_id_post((uint32_t)value);
++#if CONFIG_NXDN
++	case UI_SET_NXDN_ID:
++		return nxdn_id_post((uint32_t)value);
++#endif
+ #endif
+ 	case UI_SET_NOISE_REDUCTION:	// ui_svc_apply hands them to the vocoder
+ 	case UI_SET_MIC_AGC: {
+@@ -738,6 +749,25 @@
+ 	job.id = id;
+ 	return cp_post(dmr_id_job);
+ }
++
++#if CONFIG_NXDN
++// The radio's own NXDN unit ID, in the general settings beside the DMR ID: NXDN channels without an ID of their own
++// carry it. 0 clears it (the channels then fall back to the DMR ID)
++static void nxdn_id_job(void *ctx)
++{
++	(void)ctx;
++	if (!codeplug_set_nxdn_id(job.id))
++		save_failed(TRN("Couldn't write the codeplug: not saved"));
++}
++
++static bool nxdn_id_post(uint32_t id)
++{
++	if (id > CODEPLUG_NXDN_ID_MAX || job_busy())
++		return false;
++	job.id = id;
++	return cp_post(nxdn_id_job);
++}
++#endif
+ #endif
+ 
+ static channel_t job_ch;	// the job's working copy of the stored channel
+--- a/docs/spec/open-firmware-cps.md
++++ b/docs/spec/open-firmware-cps.md
+@@ -399,7 +399,7 @@
+ | 0x00 | 8 | Callsign / radio name, ASCII, 0xFF padded |
+ | 0x08 | 4 | The radio's DMR ID: 8 BCD digits stored big endian (bytes in reading order, for example ID 2345678 is 02 34 56 78) |
+ | 0x0C | 1 | Codeplug version byte, written by the CPS. Not used by the firmware |
+-| 0x0D | 3 | Reserved |
++| 0x0D | 3 | The radio's NXDN unit ID (multi-mode derivative): marker 0x4E, then the ID as 16 bits big endian (20028 is 4E 4E 3C), 1-65519. Any other first byte means none. NXDN channels without their own ID carry it |
+ | 0x10 | 1 each | ARS init delay, TX preamble duration, monitor type, VOX sensitivity, RX low battery, call alert duration, response timer, reminder timer, group hang, private hang (0x10..0x19) |
+ | 0x1A | 4 | flag1..flag4 |
+ | 0x1E | 2 | Reserved |
+--- a/site/i18n/en.json
++++ b/site/i18n/en.json
+@@ -1559,6 +1559,10 @@
+  "editor.members.count": "{n} of {max}",
+  "editor.general.dmr_id": "DMR ID",
+  "editor.general.dmr_id_help": "Your own DMR ID from RadioID.net.",
++ "editor.general.nxdn_id": "NXDN ID",
++ "editor.general.nxdn_id_help": "Your NXDN unit ID, 1 to 65519. NXDN channels use it unless the channel has its own. Blank uses the DMR ID.",
++ "editor.problem.nxdn_id_range": "The {field} must be between 1 and 65519.",
++ "editor.field.nxdnId": "NXDN ID",
+  "editor.general.radio_name": "Radio Name",
+  "editor.general.radio_name_help": "Usually your callsign. Sent as talker alias.",
+  "editor.general.boot1": "Boot Text Line 1",
+--- a/site/i18n/es.json
++++ b/site/i18n/es.json
+@@ -1559,6 +1559,10 @@
+  "editor.members.count": "{n} de {max}",
+  "editor.general.dmr_id": "ID DMR",
+  "editor.general.dmr_id_help": "Tu propio ID DMR de RadioID.net.",
++ "editor.general.nxdn_id": "ID NXDN",
++ "editor.general.nxdn_id_help": "Tu ID de unidad NXDN, de 1 a 65519. Los canales NXDN la usan salvo que el canal tenga la suya. En blanco usa el ID DMR.",
++ "editor.problem.nxdn_id_range": "El {field} debe estar entre 1 y 65519.",
++ "editor.field.nxdnId": "ID NXDN",
+  "editor.general.radio_name": "Nombre de la radio",
+  "editor.general.radio_name_help": "Normalmente tu indicativo. Se envía como alias de hablante.",
+  "editor.general.boot1": "Texto de arranque, línea 1",
+--- a/site/i18n/it.json
++++ b/site/i18n/it.json
+@@ -1559,6 +1559,10 @@
+  "editor.members.count": "{n} di {max}",
+  "editor.general.dmr_id": "ID DMR",
+  "editor.general.dmr_id_help": "Il tuo ID DMR personale da RadioID.net.",
++ "editor.general.nxdn_id": "ID NXDN",
++ "editor.general.nxdn_id_help": "Il tuo ID unità NXDN, da 1 a 65519. I canali NXDN lo usano se il canale non ne ha uno proprio. Vuoto usa l'ID DMR.",
++ "editor.problem.nxdn_id_range": "Il campo {field} deve essere tra 1 e 65519.",
++ "editor.field.nxdnId": "ID NXDN",
+  "editor.general.radio_name": "Nome radio",
+  "editor.general.radio_name_help": "Di solito il tuo nominativo. Inviato come alias parlante.",
+  "editor.general.boot1": "Testo di avvio riga 1",
+--- a/site/static/js/codeplug/model.js
++++ b/site/static/js/codeplug/model.js
+@@ -287,6 +287,7 @@
+ 	const g = m.general;
+ 	if (!g.dmrId) warn("general", null, "dmrId", "no_dmr_id");
+ 	else if (g.dmrId > 0xFFFFFF) err("general", null, "dmrId", "id_range");
++	if (g.nxdnId && (g.nxdnId < 1 || g.nxdnId > 65519)) err("general", null, "nxdnId", "nxdn_id_range");
+ 	if (g.radioName.length > LIMITS.radioName) err("general", null, "radioName", "too_long", { max: LIMITS.radioName });
+ 
+ 	const counts = [["channels", LIMITS.channels], ["contacts", LIMITS.contacts], ["rxLists", LIMITS.rxLists],
+--- a/site/static/js/codeplug/records.js
++++ b/site/static/js/codeplug/records.js
+@@ -28,6 +28,7 @@
+ 
+ export const GENERAL = EE + 0x00E0;
+ export const GENERAL_SIZE = 0x28;
++const NXDN_MARK = 0x4E;
+ export const DTMF_CONTACTS = EE + 0x2F88;
+ export const APRS_BASE = EE + 0x1588;
+ export const LUCZ = EE + 0x6000;
+@@ -364,6 +365,8 @@
+ 	return {
+ 		radioName: getName(g, 0, 8),
+ 		dmrId: getBcdId(g, 8),
++		// The radio's NXDN unit ID: general settings 0x0D, a marker byte (0x4E) then 16 bits big endian; else none
++		nxdnId: g[0x0D] === NXDN_MARK ? (g[0x0E] << 8) | g[0x0F] : 0,
+ 		groupHang: g[0x18] === 0xFF ? 0 : g[0x18],
+ 		privateHang: g[0x19] === 0xFF ? 0 : g[0x19],
+ 		bootLine1: getName(b, BOOT_TEXT, 16),
+@@ -379,6 +382,10 @@
+ 		if (s.dmrId) putBcdId(g, 8, s.dmrId);
+ 		else g.fill(0xFF, 8, 12);
+ 	}
++	if (was.nxdnId !== (s.nxdnId || 0)) {
++		if (s.nxdnId) g.set([NXDN_MARK, (s.nxdnId >> 8) & 0xFF, s.nxdnId & 0xFF], 0x0D);
++		else g.fill(0xFF, 0x0D, 0x10);
++	}
+ 	if (was.groupHang !== s.groupHang) g[0x18] = s.groupHang & 0xFF;
+ 	if (was.privateHang !== s.privateHang) g[0x19] = s.privateHang & 0xFF;
+ 	if (was.bootLine1 !== s.bootLine1) putName(b, BOOT_TEXT, 16, s.bootLine1);
+--- a/site/static/js/editor/app.js
++++ b/site/static/js/editor/app.js
+@@ -385,6 +385,7 @@
+ 	const parts = [
+ 		h("div", { class: "form-grid ed-radio-form" },
+ 			field("dmrId", t("editor.general.dmr_id"), 8, t("editor.general.dmr_id_help"), num(0, 0xFFFFFF)),
++			field("nxdnId", t("editor.general.nxdn_id"), 5, t("editor.general.nxdn_id_help"), num(0, 65519)),
+ 			field("radioName", t("editor.general.radio_name"), LIMITS.radioName, t("editor.general.radio_name_help"), text(LIMITS.radioName)),
+ 			field("bootLine1", t("editor.general.boot1"), LIMITS.bootText, null, text(LIMITS.bootText)),
+ 			field("bootLine2", t("editor.general.boot2"), LIMITS.bootText, null, text(LIMITS.bootText)),
+--- a/site/tests/codeplug.test.mjs
++++ b/site/tests/codeplug.test.mjs
+@@ -14,6 +14,7 @@
+ import { CodeplugImage, CODEPLUG_SPAN } from "../static/js/codeplug/image.js";
+ import { decode, encode, empty, remove, validate, newChannel, newContact, refNumber, listenBand } from "../static/js/codeplug/model.js";
+ import { getTone, putTone, parseTone, parseFreq, mhz, getCoord, coordBytes } from "../static/js/codeplug/fields.js";
++import { GENERAL } from "../static/js/codeplug/records.js";
+ import * as iddb from "../static/js/codeplug/iddb.js";
+ import { targets } from "../static/js/flasher/restore.js";
+ 
+@@ -441,6 +442,19 @@
+ 	assert.equal(back.general.groupHang, fleet.general.groupHang);
+ });
+ 
++test("the radio's NXDN ID round-trips through the general settings, and an unmarked block reads as none", () => {
++	const m = rich();
++	assert.equal(decode(encode(m)).general.nxdnId, 0);
++	m.general.nxdnId = 20028;
++	const img = encode(m);
++	assert.equal(decode(img).general.nxdnId, 20028);
++	assert.deepEqual([...img.bytes.subarray(GENERAL + 0x0D, GENERAL + 0x10)], [0x4E, 0x4E, 0x3C]);
++	m.general.nxdnId = 0;
++	assert.equal(decode(encode(m)).general.nxdnId, 0);
++	m.general.nxdnId = 65520;
++	assert.ok(validate(m).some((p) => p.field === "nxdnId" && p.level === "error"));
++});
++
+ test("the fast protocol reads what the CPS reads, and writes only the blocks that changed", async () => {
+ 	const s = simRadio(["--populate"]);
+ 	const tr = new CpsSerial(s);
+--- a/tests/host/codeplugEditTest.c
++++ b/tests/host/codeplugEditTest.c
+@@ -266,6 +266,10 @@
+ 	CHECK(codeplug_set_dmr_id(3101276) && codeplug_dmr_id() == 3101276);
+ 	CHECK(sim_flash_data[EE + 0xE8] == 0x03 && sim_flash_data[EE + 0xEB] == 0x76);
+ 	CHECK(codeplug_set_dmr_id(0) && codeplug_dmr_id() == 0);
++	CHECK(codeplug_nxdn_id() == 0 && codeplug_set_nxdn_id(20028) && codeplug_nxdn_id() == 20028);
++	CHECK(sim_flash_data[EE + 0xED] == 0x4E && sim_flash_data[EE + 0xEE] == 0x4E && sim_flash_data[EE + 0xEF] == 0x3C);
++	CHECK(!codeplug_set_nxdn_id(65520) && codeplug_nxdn_id() == 20028 && codeplug_dmr_id() == 0);
++	CHECK(codeplug_set_nxdn_id(0) && codeplug_nxdn_id() == 0);
+ 	CHECK(codeplug_set_radio_name("N0CALL-LONGER"));
+ 	codeplug_radio_name(name);
+ 	CHECK(strcmp(name, "N0CALL-L") == 0);
+--- a/tests/host/radioCoreTest.c
++++ b/tests/host/radioCoreTest.c
+@@ -240,6 +240,8 @@
+ 	{ "Local", 9, CONTACT_GROUP, 0 },
+ };
+ uint32_t codeplug_dmr_id(void) { return own_dmr_id; }
++static uint32_t own_nxdn_id;
++uint32_t codeplug_nxdn_id(void) { return own_nxdn_id; }
+ bool codeplug_set_dmr_id(uint32_t id)
+ {
+ 	own_dmr_id = id;
+@@ -4774,6 +4776,20 @@
+ 	req(RREQ_PTT, 1);
+ 	CHECK(sm.view.state == RS_TX_DENIED && sm.view.tx_deny == TXDENY_NXDN_ID);
+ 	req(RREQ_PTT, 0);
++	// The radio's NXDN ID covers a channel without an ID of its own, though the DMR ID is out of range
++	chans[3].dmr_id = 0;
++	own_nxdn_id = 20028;
++	req(RREQ_ZONE_POS, 0);
++	run(30);
++	req(RREQ_ZONE_POS, 2);
++	run(30);
++	CHECK(dv.cfg.unit_id == 20028);
++	dv_ptt();
++	CHECK(sm.view.state == RS_TX && sm.view.dv.source == 20028);
++	dv_tx_ended(NT_TX_COMPLETE_);
++	req(RREQ_PTT, 0);
++	run(20);
++	own_nxdn_id = 0;
+ 	own_dmr_id = id;
+ 
+ #if !(CONFIG_P25 && CONFIG_P25_NATIVE)
+--- a/tests/host/radioFeaturesTest.c
++++ b/tests/host/radioFeaturesTest.c
+@@ -300,6 +300,7 @@
+ }
+ static const contact_t contacts[] = { { "Local", 9, CONTACT_GROUP, 0 } };
+ uint32_t codeplug_dmr_id(void) { return 3101276; }
++uint32_t codeplug_nxdn_id(void) { return 0; }
+ bool codeplug_contact(uint16_t index, contact_t *out)
+ {
+ 	if (index != 1) {
+--- a/tests/host/radioListenBandsTest.c
++++ b/tests/host/radioListenBandsTest.c
+@@ -199,6 +199,7 @@
+ 	return true;
+ }
+ uint32_t codeplug_dmr_id(void) { return 3101276; }
++uint32_t codeplug_nxdn_id(void) { return 0; }
+ bool codeplug_contact(uint16_t index, contact_t *out) { (void)index; (void)out; return false; }
+ bool codeplug_listen_list(uint16_t index, listen_list_t *out) { (void)index; (void)out; return false; }
+ bool codeplug_contact_find(uint32_t id, bool group, contact_t *out) { (void)id; (void)group; (void)out; return false; }
+--- a/tests/host/roamTest.c
++++ b/tests/host/roamTest.c
+@@ -747,6 +747,7 @@
+ }
+ static const contact_t contacts[] = { { "Local", 9, CONTACT_GROUP, 0 }, { "World", 91, CONTACT_GROUP, 0 } };
+ uint32_t codeplug_dmr_id(void) { return 3101276; }
++uint32_t codeplug_nxdn_id(void) { return 0; }
+ bool codeplug_contact(uint16_t index, contact_t *out)
+ {
+ 	if (index < 1 || index > 2) {
+--- a/tests/host/sim/ui_sim.c
++++ b/tests/host/sim/ui_sim.c
+@@ -801,6 +801,7 @@
+ }
+ 
+ uint32_t codeplug_dmr_id(void) { return 3101276; }
++uint32_t codeplug_nxdn_id(void) { return 0; }
+ 
+ // Contacts the contact editor saved (ui_svc_write_contact): at the numbers past the built-in ones
+ #define SIM_CONTACT_EDITS	4
+--- a/site/static/js/codeplug/transport.js
++++ b/site/static/js/codeplug/transport.js
+@@ -34,9 +34,9 @@
+ // overlay"), so a verify doesn't compare it
+ export const VFOS = [0x7590, 0x7600];
+ 
+-// What makes one radio itself (open-firmware-cps.md 7.3.2, 7.2): its name and DMR ID, and its boot text. A write that
++// What makes one radio itself (open-firmware-cps.md 7.3.2, 7.2): its name, DMR ID and NXDN ID, and its boot text. A write that
+ // keeps them programs one codeplug into many radios
+-export const IDENTITY = [[GENERAL, GENERAL + 12], [BOOT_TEXT, BOOT_TEXT + 32]];
++export const IDENTITY = [[GENERAL, GENERAL + 12], [GENERAL + 0x0D, GENERAL + 0x10], [BOOT_TEXT, BOOT_TEXT + 32]];
+ 
+ // want with the radio's own identity bytes (have: its bytes as read) in place of the file's
+ export function keepIdentity(want, have) {

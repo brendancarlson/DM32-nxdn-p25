@@ -24,7 +24,7 @@ Build switch: `CONFIG_NXDN=y` (on in `tools/build_radiofoundry.py`'s presets; `-
 | TX RAN | 0-63 | 0x22 | TX RAN |
 | Group | 1-65535 (65535 the all call): where PTT talks, and the group RX plays | 0x2E | Talkgroup |
 | Hear all groups | play every group (else ours and the all call) | 0x31 bit 6 | Hear All Groups |
-| Unit ID | 1-65519; blank uses the radio's DMR ID, which must then be 65519 or less | 0x27-0x29 | DMR ID (alias Unit ID) |
+| Unit ID | 1-65519; blank uses the radio's NXDN ID (Settings > My radio, or the editor's Radio page), else its DMR ID, which must then be 65519 or less | 0x27-0x29 | DMR ID (alias Unit ID) |
 | Power, time-out, RX only, scan skip | as FM/DMR | as FM/DMR | as FM/DMR |
 
 On the radio the channel editor cycles the mode FM, DMR, P25, NXDN (each where the build has it). Digital monitor, as on DMR (a short press of the monitor

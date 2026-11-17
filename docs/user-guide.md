@@ -57,7 +57,7 @@ between the channel's own NAC/RAN and every NAC/RAN, keeping the TX one.
 | Hear All Groups | play every talkgroup | play every group | follow every group call on the system |
 | WACN | - | - | 5 hex digits, from the system's administrator (or RadioReference); 0 hears any (receive only) |
 | System ID | - | - | 3 hex digits, from the system's administrator (or RadioReference); 0 hears any (receive only) |
-| Unit ID | the channel's ID, else the radio's DMR ID | the same; NXDN needs 1-65519 | the same: **the ID the administrator assigned you** |
+| Unit ID | the channel's ID, else the radio's DMR ID | the channel's ID, else the radio's NXDN ID, else the DMR ID; NXDN needs 1-65519 | the same: **the ID the administrator assigned you** |
 
 ## DMR repeaters with restricted access (RAS)
 
@@ -139,8 +139,10 @@ back to 0.
 - `SelfOnly=1` under `[P25]` or `[NXDN]` and your unit ID is not the hotspot's own ID. For NXDN that is your
   NXDN ID (65519 or less), not your DMR ID.
 
-**NXDN ID.** NXDN IDs go up to 65519. A channel without its own Unit ID uses your DMR ID, and a 7-digit DMR ID is
-too large: PTT shows "NXDN ID above 65519". Put your NXDN ID in the channel's Unit ID.
+**NXDN ID.** NXDN IDs go up to 65519. Set yours once, in Settings > My radio > NXDN ID or the Codeplug Editor's Radio
+page (stored in the codeplug, e.g. 20028 beside DMR ID 3120028). NXDN channels use it unless the channel has its own
+Unit ID. With none set they fall back to your DMR ID, and a 7-digit DMR ID is too large: PTT shows "NXDN ID above
+65519".
 
 The Pi-Star live log shows where a call stops. If nothing at all appears while you transmit, the hotspot does not
 hear a valid signal. Report it with the radio's version, mode and frequency.

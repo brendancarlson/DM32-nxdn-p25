@@ -1,5 +1,14 @@
 # DM-32 conventional P25 progress
 
+## 2026-11-17 Radio-wide NXDN ID
+
+The codeplug's general settings now hold an NXDN unit ID (bytes 0x0D-0x0F: marker 0x4E, 16-bit ID). Settings > My radio
+has an NXDN ID row, and the Codeplug Editor's Radio page an NXDN ID field. An NXDN channel's unit ID is its own ID, else
+the radio's NXDN ID, else the DMR ID (patch 0036). Example: DMR 3120028, NXDN 20028.
+
+Not run: the C host tests (no Linux toolchain on this machine); the changed files pass `gcc -fsyntax-only` and the
+JavaScript round trip and i18n tests pass. Not tried on a radio.
+
 ## 2026-11-14 P25 idle speaker mute
 
 P25 keeps its PCM receive route active between calls. That also left the speaker amplifier on with no decoded
